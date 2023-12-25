@@ -35,12 +35,14 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
     user_permissions = models.ManyToManyField(Permission, blank=True, related_name="custom_user_permissions")
 
     USERNAME_FIELD = 'email'
-    REQUIRED_FIELDS = ['username']
+    # REQUIRED_FIELDS = ['username']
 
     def __str__(self):
         return self.username
 
     objects =  NewUserManager()
+    class Meta:
+        managed = True
     
 
 
@@ -123,20 +125,21 @@ class Medical_drug(models.Model):
     price = models.IntegerField(default=0)
     for_disease = models.ManyToManyField(Disease, through='DiseaseDrug', null=False)
     STATUSES = [
-        ('e', 'Черновик'), # Черновик - 'entered'
-        ('o', 'В работе'), # в работе - 'in operation'
-        ('f', 'Завершён'), # завершён - 'finished'
-        ('c', 'Отменён'), # отменён - 'cancelled'
-        ('d', 'Удалён') # удалён - 'deleted'
+        (0, 'Черновик'), # Черновик - 'entered'
+        (1, 'На рассмотрении'), # на рассмотрениии - 'in operation'
+        (2, 'Завершён'), # завершён - 'finished'
+        (3, 'Отменён'), # отменён - 'cancelled'
+        (4, 'Удалён') # удалён - 'deleted'
     ]
     TEST_STATUSES = [
         (0, 'Не удалось обратиться к асинхронному сервису'),
         (1, 'Успех'),
         (2, 'Неуспех'),
     ]
-    status = models.CharField(max_length=1, choices=STATUSES, default='e')
-    user_id = models.ForeignKey(CustomUser, on_delete=models.CASCADE, default=1)
+    status = models.IntegerField(choices=STATUSES, default=0)
     test_status = models.IntegerField(choices=TEST_STATUSES, default=1)
+    user_id = models.ForeignKey(CustomUser, on_delete=models.CASCADE, default=1)
+    
 
 
     def __str__(self):
@@ -171,7 +174,14 @@ class DiseaseDrug(models.Model):
         verbose_name_plural = 'Заболевания-препараты'
 
 
+# class Session(models.Model):
+#     session_key = models.CharField(primary_key=True, max_length=40)
+#     session_data = models.TextField()
+#     expire_date = models.DateTimeField()
 
+#     class Meta:
+#         managed = False
+#         db_table = 'django_session'
 
 
 

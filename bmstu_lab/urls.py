@@ -36,10 +36,9 @@ urlpatterns = [
 
     # для заболеваний (=услуг) 
     path(r'api/diseases/', views.get_diseases, name='diseases_list'),
-    path(r'api/diseases/get_found_diseases/', views.get_found_diseases, name='get_found_diseases'),
-    path(r'api/diseases/post/', views.post_disease, name='diseases_post'),
-    path(r'api/api/diseases/<int:id>/', views.get_disease, name='disease_detail'),
-    path(r'api/diseases/<int:id>/update/', views.put_disease, name='disease_put'),
+    path(r'api/diseases/post/', views.add_disease, name='diseases_post'),
+    path(r'api/diseases/<int:id>/', views.get_disease, name='disease_detail'),
+    path(r'api/diseases/<int:id>/update/', views.update_disease, name='disease_put'),
     path(r'api/diseases/<int:id>/delete/', views.delete_disease,name='disease_delete'),
     path(r'api/diseases/<int:id>/add_disease_to_drug/', views.add_disease_to_drug, name='add_disease_to_drug'), # (post)
 
@@ -59,6 +58,8 @@ urlpatterns = [
     path(r'api/register/', views.register, name="register"),
     path(r'api/login/',  views.login_view, name='login'),
     path(r'api/logout/', views.logout_view, name='logout'),
+    path(r'api/check/', views.check, name='logout'),
+
 
 
     path(r'api/async_result/', views.async_result),

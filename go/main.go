@@ -11,7 +11,7 @@ import (
 
 const (
 	expectedToken = "my_secret_token"
-	resultURL        = "http://127.0.0.1:8000/api/async_result/"
+	resultURL        = "http://localhost:8000/api/async_result/"
 )
 
 type TestResult struct {
@@ -134,12 +134,20 @@ func handleProcess(w http.ResponseWriter, r *http.Request) {
 		req.Header.Set("Content-Type", "application/json")
 
 		client := &http.Client{}
-		resp, err := client.Do(req)
-		if err != nil {
-			fmt.Println("Ошибка при отправке запроса на обновление:", err)
-			return
-		}
-		defer resp.Body.Close()
+		
+
+		randomValue_g := rand.Float64()
+
+		// var do_send int
+		// // 70% шанс для Успеха
+		// if randomValue_g>5 {
+		// 	resp, err := client.Do(req)
+		// 	if err != nil {
+		// 		fmt.Println("Ошибка при отправке запроса на обновление:", err)
+		// 		return
+		// 	}
+		// }
+		// defer resp.Body.Close()
 
 		fmt.Println("Ответ от сервера обновления:", resp.Status)
 	}()

@@ -32,10 +32,11 @@ class IsModerator(BasePermission):
 class IsAuthenticated(BasePermission):
     def has_permission(self, request, view):
         try:
-            ssid = request.COOKIES.get("session_id")
-            if ssid is None:
-                ssid = request.headers.get("authorization")
-            print(request.headers.get("authorization"))
+            ssid = request.COOKIES.get["session_id"]
+            print('cheeeeck', ssid)
+            # if ssid is None:
+            #     ssid = request.headers.get("Authorization")
+            # print(request.headers.get("Authorization"))
             if ssid is None:
                 return False
         except Exception as e:
