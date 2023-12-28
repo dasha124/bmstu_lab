@@ -24,9 +24,11 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.conf import settings
 import redis
 import uuid
-from .permissions import IsAuthenticated, IsModerator
+from .permissions import *
 import json
 from django.contrib.sessions.models import Session
+from .jwt_tokens import *
+from django.core.cache import cache
 
 def get_session_id(request):
     session = request.COOKIES.get('session_id')
@@ -46,6 +48,8 @@ def get_session_id(request):
 # @permission_classes([AllowAny])
 # @authentication_classes([])
 @api_view(["POST"])
+@permission_classes([AllowAny])
+@authentication_classes([])
 def register(request):
     # Ensure username and passwords are posted is properly
     serializer = UserRegisterSerializer(data=request.data)
@@ -64,58 +68,90 @@ def register(request):
     
 
 
-# @swagger_auto_schema(request_body=UserLoginSerializer)
-@authentication_classes([])
 @api_view(["POST"])
 @permission_classes([AllowAny])
+@authentication_classes([])
 def login_view(request):
-    print('Looooooogin')
+    # Проверка входных данных
     serializer = UserLoginSerializer(data=request.data)
     if not serializer.is_valid():
+        print(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
+
     # Аутентификация пользователя
-    user = authenticate(request, **serializer.data)
-    print(serializer.validated_data)
-    print(user)
-    
-    if user is not None:
-        random_key = str(uuid.uuid4())
-        session_storage.set(random_key, user.username)
+    user = authenticate(request, **serializer.validated_data)
+    if user is None:
+        message = {"message": "Пользователь не найден"}
+        return Response(message, status=status.HTTP_401_UNAUTHORIZED)
 
-        data = {
-            "session_id": random_key,
-            "user_id": user.id,
-            "email": user.email,
-            "is_superuser": user.is_superuser,
-            "username": user.username
-        }
+    # Создание токена доступа
+    access_token = create_access_token(user.id)
 
-        response = Response(data, status=status.HTTP_201_CREATED)
-        response.set_cookie("session_id", random_key, httponly=False)
+    # Сохранение данных пользователя в кеше
+    user_data = {
+        "user_id": user.id,
+        "user_name": user.username,
+        "user_email": user.email,
+        "is_superuser": user.is_superuser,
+        "access_token": access_token
+    }
+    access_token_lifetime = settings.ACCESS_TOKEN_LIFETIME
+    cache.set(access_token, user_data, access_token_lifetime)
 
-        return response
-    else:
-        return HttpResponse(status=status.HTTP_403_FORBIDDEN)
+    # Отправка ответа с данными пользователя и установкой куки
+    response_data = {
+        "user_id": user.id,
+        "user_name": user.username,
+        "user_email": user.email,
+        "is_superuser": user.is_superuser,
+        "access_token": access_token
+    }
+    response = Response(response_data, status=status.HTTP_201_CREATED)
+    response.set_cookie('access_token', access_token, httponly=False, expires=access_token_lifetime, samesite=None, secure=True)
+
+    return response
     
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def check(request):
-    session_id = request.headers.get("Authorization")
-    print(session_id)
+    access_token = get_access_token(request)
+    print("check = ", access_token)
 
-    print(session_storage.get(session_id))
+    if access_token is None:
+        message = {"message": "Token is not found"}
+        return Response(message, status=status.HTTP_401_UNAUTHORIZED)
+    if not cache.has_key(access_token):
+        message = {"message": "Token is not valid"}
+        return Response(message, status=status.HTTP_401_UNAUTHORIZED)
 
-    if (session_storage.get(session_id)):
-        user = CustomUser.objects.get(email=session_storage.get(session_id).decode('utf-8'))
-        print("user cheeeeeeck =", user)
-        
-        serializer = UserSerializer(user, many=False)
-        print(serializer.data)
+    user_data = cache.get(access_token)
+    return Response(user_data, status=status.HTTP_200_OK)
 
-        return Response(serializer.data, status=status.HTTP_200_OK)
-    return Response(status=status.HTTP_403_FORBIDDEN)
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@authentication_classes([])
+def refresh(request):
+    refresh_token = get_access_token(request)
+    if not refresh_token:
+        return Response({'error': 'Refresh token not provided'}, status=400)
+
+    try:
+        refresh_payload = get_jwt_payload(refresh_token)
+    except jwt.ExpiredSignatureError:
+        return Response({'error': 'Refresh token has expired'}, status=401)
+    except jwt.InvalidTokenError:
+        return Response({'error': 'Invalid refresh token'}, status=401)
+
+    user_id = refresh_payload.get('user_id')
+
+    if not user_id:
+        return Response({'error': 'Invalid refresh token'}, status=401)
+
+    new_access_token = create_refresh_token(user_id)
+
+    return Response({'access_token': new_access_token}, status=200)
 
 
 
@@ -124,37 +160,28 @@ def check(request):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def logout_view(request):
-    session_key = get_session_id(request)
-    print("logout ss key =", session_key)
+   
+    access_token = get_access_token(request)
+    print("logout = ", access_token)
 
-    if session_key is None:
-        return Response(status=status.HTTP_403_FORBIDDEN)
+    if access_token is None:
+        message = {"message": "Token is not found in cookie"}
+        return Response(message, status=status.HTTP_401_UNAUTHORIZED)
 
-    session_storage.delete(session_key).decode('utf-8')
+    if cache.has_key(access_token):
+        cache.delete(access_token)
 
-    logout(request._request)
-    response = HttpResponse(status=status.HTTP_200_OK)
-    response.delete_cookie("session_id")
+    message = {"message": "Logged out successfully!"}
+    response = Response(message, status=status.HTTP_200_OK)
+    response.delete_cookie('access_token')
+
     return response
 
-
-# session_key = get_session_id(request)
-#     try:
-#         email = session_storage.get(session_key).decode('utf-8')
-#         # print("em000 =", email)
-#         # current_user = CustomUser.objects.get(email=email)
-#     except:
-#         return Response('Сессия не найдена')
-#     print("em000 =", email)
-
-#     user = CustomUser.objects.get(email=email)
-#     print("uuuuuuuuuseeeeer =", type(user))
 
 
 
 # список заболеваний (услуг)
 
-# @authentication_classes([SessionAuthentication, BasicAuthentication])
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def get_diseases(request, format=None):
@@ -162,6 +189,9 @@ def get_diseases(request, format=None):
     disease_name_r = request.GET.get('disease_name')
     print('disease_name_r =', disease_name_r)
     diseases = Disease.objects.filter(status='a')
+
+    access_token = get_access_token(request)
+    print("get_diseases = ", access_token)
 
     if disease_name_r:
         diseases = Disease.objects.filter(
@@ -173,14 +203,12 @@ def get_diseases(request, format=None):
         return Response(serializer.data)
     
     serializer = DiseaseSerializer(diseases, many=True )
-    serialized_data = serializer.data
-
-
+    
     return Response(serializer.data)
 
 
 # добавление нового заболевания (услуги)
-# @permission_classes([IsModerator])
+@permission_classes([IsManager])
 @api_view(['POST'])
 def add_disease(request, format=None):
 
@@ -221,35 +249,49 @@ def update_disease(request, id, format=None):
 
 # удаление информации о заболевании (услуге)
 
-# !! @authentication_classes([SessionAuthentication, BasicAuthentication])
+
 @api_view(['DELETE'])
+@permission_classes([IsManager])
 def delete_disease(request, id, format=None):
     print('delete')
-    disease = get_object_or_404(Disease, disease_id=id)
-    disease.status='d'
+    disease = get_object_or_404(Disease, id=id)
+    disease.status="d"
     disease.save()
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 # добавление услуги в заявку
-#  !! @permission_classes([IsAuthenticated])
+
 @api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def add_disease_to_drug(request, id):
 
-    if not Disease.objects.filter(disease_id=id).exists():
+    if not Disease.objects.filter(id=id).exists():
         return Response(f"Заболевания с таким id не найдено")
     
-    ssid = request.COOKIES.get("session_id")
-    user = CustomUser.objects.get(username=session_storage.get(ssid).decode('utf-8'))
+    token = get_access_token(request)
+    print("token =", token)
+    
+    if not token:
+        # return Response({"error": "Access token not found"}, status=status.HTTP_401_UNAUTHORIZED)
+        return Response('<div>пусто</div>')
+
+
+    payload = get_jwt_payload(token)
+    user_id = payload["user_id"]
+
+    print("uuuuuuuuuser =", user_id)
+    curr_user = CustomUser.objects.get(id = user_id)
+    print("cccccccccccurrr uuser =", curr_user)
     
     
-    disease = Disease.objects.get(disease_id=id)
-    drug = Medical_drug.objects.filter(status='e').last()
+    disease = Disease.objects.get(id=id)
+    drug = Medical_drug.objects.filter(status=0).last()
 
     if drug is None:
         drug = Medical_drug.objects.create()
         print("POST add_disease_to_drug_ ID_USER=PK")
-        drug.user_id = user.pk
+        drug.user_id_id = user_id
     
     drug.for_disease.add(disease)
     drug.save()
@@ -265,90 +307,35 @@ def add_disease_to_drug(request, id):
 #  !! @permission_classes([IsModerator])
 # @authentication_classes([SessionAuthentication, BasicAuthentication])
 
-# @permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated])
 @api_view(['GET'])
 def get_drugs(request, format=None):
 
-
-    # session_key = get_session_id(request)
-    # print("ssss =", session_key)
-    # if not session_key:
-    #     print("nen1")
-    #     return JsonResponse({"error": "Session not found"}, status=401)
-
+    token = get_access_token(request)
+    # Добавлен блок для обработки отсутствия токена, вам может потребоваться определить, как обрабатывать эту ситуацию
+    if not token:
+        # return Response({"error": "Access token not found"}, status=status.HTTP_401_UNAUTHORIZED)
+        return Response('<div>пусто</div>')
 
 
+    payload = get_jwt_payload(token)
+    user_id = payload["user_id"]
 
+    print("uuuuuuuuuser =", user_id)
+    curr_user = CustomUser.objects.get(id = user_id)
+    print("cccccccccccurrr uuser =", curr_user)
 
+    if not curr_user.is_superuser:
+        drugs= Medical_drug.objects.exclude(status__in=[4, 0]).order_by('-time_create').filter(user_id_id=user_id)
+    else:
+        drugs= Medical_drug.objects.exclude(status__in=[4, 0]).order_by('-time_create')
 
-    # # Ищем сессию в базе данных
-    # try:
-    #     session = Session.objects.get(session_key=session_key)
-    #     print("nen")
-    # except Session.DoesNotExist:
-    #     return JsonResponse({"error": "Invalid session"}, status=401)
-
-    # # # Получаем данные пользователя из сессии
-    # user_id = session.get_decoded().get('_auth_user_id')
-    # print("useeeeer =", user_id)
-
-
-    # ssid = request.COOKIES.get('session_id')
-    # print('cheeeeck', ssid)
-
-
-
-
-# # Гоша, оставить
-#     session_key = get_session_id(request)
-#     try:
-#         email = session_storage.get(session_key).decode('utf-8')
-#         # print("em000 =", email)
-#         # current_user = CustomUser.objects.get(email=email)
-#     except:
-#         return Response('Сессия не найдена')
-#     print("em000 =", email)
-
-#     user = CustomUser.objects.get(email=email)
-#     print("uuuuuuuuuseeeeer =", type(user))
-#     if user.is_superuser==True:
-#         print("YYYYYYYY")
-#     else:
-#         print("Noooooooooooooo ")
-
-
-
-    # current_user = CustomUser.objects.filter(email=email)
-    # # print("cuuuuuuuut =", current_user.email)
-    # if current_user.is_superuser:
-
-
-
-# чото не то, хотя должно быть тем
-
-    # if CustomUser.objects.filter(email=email, is_superuser=True).exists():
-    #     print("YYYYYYYYYYYYYYYYYYYYYY")
-    # else:
-    #     print("NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN")
-    #     current_user = CustomUser.objects.filter(email=email)
-    #     drugs= Medical_drug.objects.filter(user_id_id=current_user.id).order_by('-time_create')
-    #     #drugs= Medical_drug.objects.all()
-    #     serializer = DrugSerializer(drugs, many=True)
-    #     # print(serializer.data)
-
-    #     return Response(serializer.data)
-    
-
-
-
-    drugs= Medical_drug.objects.exclude(status__in=[4, 0]).order_by('-time_create')
-    #drugs= Medical_drug.objects.all()
     serializer = DrugSerializer(drugs, many=True)
     # print(serializer.data)
 
     return Response(serializer.data)
 
-    
+
 
 # информация о препарате (заявке)
 #  !! @permission_classes([IsModerator])
@@ -362,6 +349,38 @@ def get_drug(request, id, format=None):
         serializer = DrugSerializer(drug)
         return Response(serializer.data)
     
+@permission_classes([IsAuthenticated])
+@api_view(['GET'])
+def create_drug(request, format=None):
+    print("try creaaaaaaaate drug")
+
+    token = get_access_token(request)
+    # Добавлен блок для обработки отсутствия токена, вам может потребоваться определить, как обрабатывать эту ситуацию
+    if not token:
+        return Response({"error": "Access token not found"}, status=status.HTTP_401_UNAUTHORIZED)
+        
+    payload = get_jwt_payload(token)
+    user_id = payload["user_id"]
+
+    print("uuuuuuuuuser =", user_id)
+    curr_user = CustomUser.objects.get(id = user_id)
+    # print("cccccccccccurrr uuser =", curr_user)
+    
+    drug = Medical_drug.objects.get(user_id_id=user_id, status=0)
+    # print(drug.for_disease.get())
+    serializer = DrugSerializer(drug, many=False)
+    return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+    
+    # drug.for_disease.objects.get()
+    
+    # print("dd =", drugs)
+    # serializer = DrugSerializer(drugs, many=True)
+    # # print(serializer.data)
+
+    return Response(serializer.data)
+
 
 # изменение информации о препарате (заявке)
 #  !! @permission_classes([IsModerator])
@@ -376,29 +395,39 @@ def update_drug(request, id, format=None):
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-# удаление информации о препарате (заявке)
-
-#  !! @permission_classes([IsModerator])
-#  !! @authentication_classes([SessionAuthentication, BasicAuthentication])
+# удаление препарата (заявки)
 @api_view(['DELETE'])
+@permission_classes([AllowAny])
+@authentication_classes([])
 def delete_drug(request, id, format=None):
-    print('delete')
-    drug = get_object_or_404(Medical_drug, drug_id=id)
-    drug.status='d'
+    print('delete drug')
+    drug = get_object_or_404(Medical_drug, id=id)
+    drug.status=4
     drug.save()
     return Response(status=status.HTTP_204_NO_CONTENT)
 
-# удаление введенного препарата (заявки)
-
-# !! @permission_classes([IsAuthenticated])
+# ???????????? удаление препарата-черновика (заявки)
+@permission_classes([IsAuthenticated])
 @api_view(['DELETE'])
 def delete_entered_drug(request, format=None):
-    if not Medical_drug.objects.filter(status='e').exists():
+    if not Medical_drug.objects.filter(status=0).exists():
         return Response(f"Препарата со статусом 'Черновик' не существует")
     
-    entered_drugs = Medical_drug.objects.filter(status='e')
+    token = get_access_token(request)
+    if not token:
+        return Response({"error": "Access token not found"}, status=status.HTTP_401_UNAUTHORIZED)
+
+    payload = get_jwt_payload(token)
+    user_id = payload["user_id"]
+
+    curr_user = CustomUser.objects.get(id = user_id)
+    print("cccccccccccurrr uuser =", curr_user)
+    
+    
+    entered_drugs = Medical_drug.objects.filter(status=0, user_id_id=user_id)
     for drug in entered_drugs:
-        drug.delete()
+        drug.status=4
+        drug.save()
     serializer = DrugSerializer(entered_drugs, many=False)
     return Response(serializer.data)
 
@@ -407,26 +436,42 @@ def delete_entered_drug(request, format=None):
 
 
 
-# !! @permission_classes([IsAuthenticated])
+
 @api_view(['PUT'])
+@permission_classes([AllowAny])
+@authentication_classes([])
 def drug_update_status_user(request, id):
-    if not Medical_drug.objects.filter(drug_id=id).exists():
+
+
+    print("___________drug_update_status_user")
+
+    token = get_access_token(request)
+    # Добавлен блок для обработки отсутствия токена, вам может потребоваться определить, как обрабатывать эту ситуацию
+    if not token:
+        return Response({"error": "Access token not found"}, status=status.HTTP_401_UNAUTHORIZED)
+        
+    payload = get_jwt_payload(token)
+    user_id = payload["user_id"]
+
+    print("uuuuuuuuuser =", user_id)
+
+    if not Medical_drug.objects.filter(id=id).exists():
         return Response(f"Препарата с таким id не существует")
     
-    STATUSES = ['e', 'o', 'f', 'c', 'd']
+    STATUSES = [0, 1, 2, 3, 4]
     request_st = request.data["status"]
 
     if request_st not in STATUSES:
         return Response("Статус не корректен")
     
-    drug = Medical_drug.objects.get(drug_id=id)
+    drug = Medical_drug.objects.get(id=id)
     drug_st = drug.status
     print("drug_st =", drug_st)
 
-    if drug_st == 'd':
+    if drug_st == 4:
         return Response("Изменение статуса невозможно")
     
-    if request_st == 'd':
+    if request_st == 1:
         drug.status = request_st
         drug.save()
 
@@ -441,21 +486,23 @@ def drug_update_status_user(request, id):
 #  !! @permission_classes([IsModerator])
 #  !! @authentication_classes([SessionAuthentication, BasicAuthentication])
 @api_view(['PUT'])
+@permission_classes([IsManager])
+@authentication_classes([])
 def drug_update_status_admin(request, id):
-    if not Medical_drug.objects.filter(drug_id=id).exists():
+    if not Medical_drug.objects.filter(id=id).exists():
         return Response(f"Препарата с таким id не существует")
     
-    STATUSES = ['e', 'o', 'f', 'c', 'd']
+    STATUSES = [0, 1, 2, 3, 4]
     request_st = request.data["status"]
 
     if request_st not in STATUSES:
         return Response("Статус не корректен")
     
-    drug = Medical_drug.objects.get(drug_id=id)
+    drug = Medical_drug.objects.get(id=id)
     drug_st = drug.status
     print("drug_st =", drug_st)
 
-    if request_st == 'f' or request_st == 'c':
+    if request_st == 2 or request_st == 3:
         drug.status = request_st
         drug.save()
 
@@ -472,15 +519,15 @@ def drug_update_status_admin(request, id):
 @api_view(['DELETE'])
 def delete_disease_from_drug(request, disease_id_r, drug_id_r, format=None):
     print('delete')
-    if not Disease.objects.filter(disease_id=disease_id_r).exists():
+    if not Disease.objects.filter(id=disease_id_r).exists():
         return Response(f"Заболевания с таким id не существует")
     if not Medical_drug.objects.filter(drug_id=drug_id_r).exists():
         return Response(f"Препарата с таким id не существует")
     
     
-    disease = Disease.objects.get(disease_id=disease_id_r)
+    disease = Disease.objects.get(id=disease_id_r)
     print("disease =", disease)
-    drug = Medical_drug.objects.get(drug_id=drug_id_r)
+    drug = Medical_drug.objects.get(id=drug_id_r)
     print("drug =", drug)
     if drug.for_disease.exists():
         print("drug_disease type =", drug.for_disease.get())

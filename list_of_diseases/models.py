@@ -119,17 +119,17 @@ class Medical_drug(models.Model):
     drug_name = models.CharField(max_length=150, default='Название лекарства')
     sphere_id = models.ForeignKey(Sphere, on_delete=models.CASCADE, default=1)
     # автоматом ставим время только при изменении объекта, а не при создании
-    time_create = models.DateTimeField(auto_now_add=True) 
-    time_form = models.DateTimeField(auto_now=True) 
-    time_finish = models.DateTimeField(auto_now=True)
+    time_create = models.DateField(blank=True, null=True) 
+    time_form = models.DateField(blank=True, null=True) 
+    time_finish = models.DateField(blank=True, null=True)
     price = models.IntegerField(default=0)
     for_disease = models.ManyToManyField(Disease, through='DiseaseDrug', null=False)
     STATUSES = [
         (0, 'Черновик'), # Черновик - 'entered'
-        (1, 'На рассмотрении'), # на рассмотрениии - 'in operation'
-        (2, 'Завершён'), # завершён - 'finished'
-        (3, 'Отменён'), # отменён - 'cancelled'
-        (4, 'Удалён') # удалён - 'deleted'
+        (1, 'Сформирована'), # на рассмотрениии - 'in operation'  - юзер смена
+        (2, 'Завершён'), # завершён - 'finished' - (одобрен) админ
+        (3, 'Отменён'), # отменён - 'cancelled'  - (отклонен) админ
+        (4, 'Удалён') # удалён - 'deleted'  - юзер смена
     ]
     TEST_STATUSES = [
         (0, 'Не удалось обратиться к асинхронному сервису'),
@@ -139,6 +139,7 @@ class Medical_drug(models.Model):
     status = models.IntegerField(choices=STATUSES, default=0)
     test_status = models.IntegerField(choices=TEST_STATUSES, default=1)
     user_id = models.ForeignKey(CustomUser, on_delete=models.CASCADE, default=1)
+    moderator = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='moderator', blank=True, null=True)
     
 
 

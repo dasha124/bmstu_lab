@@ -42,6 +42,7 @@ urlpatterns = [
     path(r'api/diseases/<int:id>/delete/', views.delete_disease,name='disease_delete'),
     path(r'api/diseases/<int:id>/add_disease_to_drug/', views.add_disease_to_drug, name='add_disease_to_drug'), # (post)
 
+
     # для препаратов (=заявок)
     path(r'api/drugs/', views.get_drugs, name='drugs_list'),
     path(r'api/drugs/<int:id>/', views.get_drug, name='drug_detail'),
@@ -50,7 +51,8 @@ urlpatterns = [
     path(r'api/drugs/delete_entered_drug/', views.delete_entered_drug,name='delete_entered_drug'),
     path(r'api/drugs/<int:id>/update_st_user/', views.drug_update_status_user,name='drug_update_status_user'),
     path(r'api/drugs/<int:id>/update_st_admin/', views.drug_update_status_admin,name='drug_update_status_admin'),
-    path(r'api/drugs/<int:disease_id_r>/<int:drug_id_r>/delete_disease_from_drug/', views.delete_disease_from_drug, name='delete_disease_from_drug'),
+    path(r'api/drugs/<int:disease_id_r>/<int:drug_id_r>/delete_disease_from_drug/', views.delete_disease_from_drug, name='del_dis_from_drug'),
+    path(r'api/drugs/create_drug/', views.create_drug, name='drug_create'),
 
 
     # path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),

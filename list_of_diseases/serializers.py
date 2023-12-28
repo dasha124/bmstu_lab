@@ -21,11 +21,18 @@ class SphereSerializer(serializers.ModelSerializer):
 class DrugSerializer(serializers.ModelSerializer):
 
     disease = DiseaseSerializer(read_only = True, many=True, source='for_disease')
-    sphere_id = SphereSerializer()
     
     class Meta:
         model = Medical_drug
         fields= "__all__"
+
+
+class DrugSerializer_get(serializers.ModelSerializer):
+    diseases = DiseaseSerializer(read_only = True, many=True)
+    
+    class Meta:
+        model = Medical_drug
+        fields= ['id', 'time_create', 'time_form', 'time_finish', 'user_id', 'status', 'diseases']
 
 
 class UserRegisterSerializer(serializers.ModelSerializer):
